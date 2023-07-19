@@ -1,0 +1,19 @@
+
+1. Initializtion:
+	- invoke empty sybol table
+	- populate with predefined symbols
+
+2. First pass
+	- Scan the program, keeping track of the instruction numbers (line numbers - whitespace)
+	- Add (LABELs) to the table + instr. number
+
+3. Second pass
+	- Set n to 16 (for variables)
+	- For each @instruction  look up the  symbol
+		- if in table - generate A instrcution
+		- else:
+			- add (symbol, n)
+			-  generate instruction
+			- n++
+	- If C - instruction, generate C instruction
+	
