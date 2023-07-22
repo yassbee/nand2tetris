@@ -1,15 +1,19 @@
 
 import sys
 import re
+from read_all import read_in
 
 
-instr_len = { 'push_constant': 7, "eq_func":22, "lt_func": 22, "gt_func": 22, "add_func":8, "sub_func":8, "neg_func":3, "and_func":8, "or_func":8, "not_func":3, 'push_local':11, 'pop_local':14, 'push_this':11, 'pop_this':14, 'push_that':11, 'pop_that':14, 'push_argument':11, 'pop_argument':14, 'push_temp':7, 'pop_temp':7, 'push_pointer':18, 'pop_pointer':17, 'pop_static':7, 'push_static':0, 'label_func':0, 'ifgoto_func':5, 'goto_func':2 }
+instr_len = { 'push_constant': 7, "eq_func":22, "lt_func": 22, "gt_func": 22, "add_func":8, "sub_func":8, "neg_func":3, "and_func":8, "or_func":8, "not_func":3, 'push_local':11, 'pop_local':14, 'push_this':11, 'pop_this':14, 'push_that':11, 'pop_that':14, 'push_argument':11, 'pop_argument':14, 'push_temp':7, 'pop_temp':7, 'push_pointer':18, 'pop_pointer':17, 'pop_static':7, 'push_static':0, 'label_func':0, 'ifgoto_func':5, 'goto_func':2, 'return_func':55  }
 
 cmd_singleton = {'add_func', 'sub_func', 'neg_func', 'eq_func', 'gt_func', 'lt_func','or_func', 'not_func'}
 cmd_pointer = {'push_pointer', 'pop_pointer'}
 cmd_pushpop = {'push_this', 'pop_this', 'push_local', 'pop_local', 'push_argument', 'pop_argument', 'push_that', 'pop_that', 'push_temp', 'pop_temp','push_static', 'pop_static', 'push_constant', 'pop_constant'}
 
 cmd_progflow = {'label_func', 'ifgoto_func', 'goto_func' }
+
+cmd_function = {'function_func'}
+cmd_return  = {'return_func'}
 
 
                 
@@ -426,7 +430,67 @@ def ifgoto_func(name) :
 def goto_func(name) :
     output = ['@' + str(name), '0;JMP']
     return output
-        
+
+
+## Function calls
+
+def function_func (name, numargs) :
+    output = []
+    output.append(label_func(name))
+    for i in range(int(numargs)) : 
+        output.append(push_local(0))
+    return output
+
+def return_func() :
+    ##restore caller registers
+    def rest_seg(segname) :
+        offsets = { 'THAT': 1, 'THIS' : 2, 'ARG': 3, 'LCL': 4}
+        offval = offsets[segname]
+        rest_out = [ 
+                    '@FRAME',
+                    'D=M',
+                    '@'+ str(offval),
+                    'D = D-A',
+                    'A=D',
+                    'D=M',
+                    '@' + segname,
+                    'M=D' ] 
+        return rest_out
+    output = [ 
+              ## store FRAME
+              '@LCL',
+              'D = M',
+              '@FRAME',
+              'M=D',
+            ## store RET
+              '@5',
+              'D=A',
+              '@FRAME',
+              'D=M-D',
+              '@RET',
+              'M=D',
+              ## *ARG = pop() 
+              '@SP',
+              'A=M-1',
+              'D=M',
+              '@ARG',
+              'A=M',
+              'M=D',
+            ##SP = ARG +1
+              '@ARG',
+              'D=M',
+              '@SP',
+              'M=D+1',
+              ] 
+    output.extend(rest_seg('THAT'))
+    output.extend(rest_seg('THIS'))
+    output.extend(rest_seg('ARG'))
+    output.extend(rest_seg('LCL'))
+    output.extend(['@RET', 'A=M', '0;JMP'])
+
+
+    return output
+
 ##extract instruction symbol
 def extract_instr (instruction) :
     if len(instruction) == 1:
@@ -456,9 +520,19 @@ def generate_ass(vm_instructions) :
         ## program flow
         elif instr in cmd_progflow :
             output.extend(globals()[instr](instruction[1]))
+            counter += instr_len[instr]
+        elif instr in cmd_function :
+            output.extend(globals()[instr](instruction[1], int(instruction[2])))
+            counter += 1 + int(instruction[2])
+        elif instr in cmd_return :
+            output.extend(globals()[instr]())
+            counter += instr_len[instr]
+
 
     print ("@MAIN_LOOP_START" in output)
     return output
+
+
 
 def gen_file(ass_out, in_file) :
     pos = in_file.find(".")
