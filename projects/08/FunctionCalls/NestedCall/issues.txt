@@ -1,0 +1,3 @@
+
+[] check that the return function is properly called
+[] check if RET and FRAME should not be made function specific

@@ -4,7 +4,7 @@ import re
 from read_all import read_in
 
 
-instr_len = { 'push_constant': 7, "eq_func":22, "lt_func": 22, "gt_func": 22, "add_func":8, "sub_func":8, "neg_func":3, "and_func":8, "or_func":8, "not_func":3, 'push_local':11, 'pop_local':14, 'push_this':11, 'pop_this':14, 'push_that':11, 'pop_that':14, 'push_argument':11, 'pop_argument':14, 'push_temp':7, 'pop_temp':7, 'push_pointer':18, 'pop_pointer':17, 'pop_static':7, 'push_static':0, 'label_func':0, 'ifgoto_func':5, 'goto_func':2, 'return_func':55  }
+instr_len = { 'push_constant': 7, "eq_func":22, "lt_func": 22, "gt_func": 22, "add_func":8, "sub_func":8, "neg_func":3, "and_func":8, "or_func":8, "not_func":3, 'push_local':11, 'pop_local':14, 'push_this':11, 'pop_this':14, 'push_that':11, 'pop_that':14, 'push_argument':11, 'pop_argument':14, 'push_temp':7, 'pop_temp':7, 'push_pointer':18, 'pop_pointer':17, 'pop_static':7, 'push_static':0, 'label_func':0, 'ifgoto_func':5, 'goto_func':2, 'return_func':55, 'call_func':49  }
 
 cmd_singleton = {'add_func', 'sub_func', 'neg_func', 'eq_func', 'gt_func', 'lt_func','or_func', 'not_func'}
 cmd_pointer = {'push_pointer', 'pop_pointer'}
@@ -13,8 +13,10 @@ cmd_pushpop = {'push_this', 'pop_this', 'push_local', 'pop_local', 'push_argumen
 cmd_progflow = {'label_func', 'ifgoto_func', 'goto_func' }
 
 cmd_function = {'function_func'}
+cmd_call = {'call_func'}
 cmd_return  = {'return_func'}
 
+label_counter = 0;
 
                 
                     
@@ -436,9 +438,9 @@ def goto_func(name) :
 
 def function_func (name, numargs) :
     output = []
-    output.append(label_func(name))
+    output.extend(label_func(name))
     for i in range(int(numargs)) : 
-        output.append(push_local(0))
+        output.extend(push_constant(0))
     return output
 
 def return_func() :
@@ -447,7 +449,7 @@ def return_func() :
         offsets = { 'THAT': 1, 'THIS' : 2, 'ARG': 3, 'LCL': 4}
         offval = offsets[segname]
         rest_out = [ 
-                    '@FRAME',
+                    '@R11',
                     'D=M',
                     '@'+ str(offval),
                     'D = D-A',
@@ -459,15 +461,14 @@ def return_func() :
     output = [ 
               ## store FRAME
               '@LCL',
-              'D = M',
-              '@FRAME',
+              'D=M',
+              '@R11',
               'M=D',
             ## store RET
               '@5',
-              'D=A',
-              '@FRAME',
-              'D=M-D',
-              '@RET',
+              'A=D-A',
+              'D=M',
+              '@R12',
               'M=D',
               ## *ARG = pop() 
               '@SP',
@@ -486,16 +487,78 @@ def return_func() :
     output.extend(rest_seg('THIS'))
     output.extend(rest_seg('ARG'))
     output.extend(rest_seg('LCL'))
-    output.extend(['@RET', 'A=M', '0;JMP'])
+    output.extend(['@R12', 'A=M', '0;JMP'])
 
 
     return output
+
+def call_func (funcname, numargs) :
+    global label_counter
+    new_lbl = 'RETLABEL' + str(label_counter)
+    label_counter += 1
+    def push_reg (type) :
+        output = [
+                '@' + type,
+                'D=M',
+                '@SP',
+                'A=M',
+                'M=D',
+                '@SP',
+                'M=M+1']
+        return output
+    asm = [
+            '@' + new_lbl,
+            'D=A',
+            '@SP',
+             'A=M',
+             'M=D',
+             '@SP',
+             'M=M+1']
+    ##asm.extend(push_reg(new_lbl))
+    asm.extend(push_reg('LCL'))
+    asm.extend(push_reg('ARG'))
+    asm.extend(push_reg('THIS'))
+    asm.extend(push_reg('THAT'))
+    asm.extend([
+        '@SP',
+        'D=M',
+        '@5',
+        'D=D-A',
+        '@' + str(numargs),
+        'D=D-A',
+        '@ARG',
+        'M=D'
+        ])
+    asm.extend([ 
+        '@SP',
+        'D=M',
+        '@LCL',
+        'M=D',
+        ])
+    asm.extend([
+        '@' + funcname,
+        '0, JMP',
+        '(' + new_lbl + ')',
+        ])
+    return asm
+
+def boot_func() :
+    asm = [
+            '@256',
+            'D=A',
+            '@SP',
+            'M=D',
+            ]
+    asm.extend(call_func("Sys.init",0))
+    return asm
+        
+   
 
 ##extract instruction symbol
 def extract_instr (instruction) :
     if len(instruction) == 1:
         return instruction[0] + "_func"
-    elif instruction[0] in {'label', 'if-goto', 'goto'} :
+    elif instruction[0] in {'label', 'if-goto', 'goto', 'function', 'call', 'return'} :
        instr = instruction[0] + "_func"
        return instr.replace('-','')
     else : 
@@ -504,32 +567,42 @@ def extract_instr (instruction) :
 def generate_ass(vm_instructions) :
     output = []
     counter = 0
+    output.extend(boot_func()) 
+    counter += 53 
     for instruction in vm_instructions : 
         ## arithmetic instructions (add, sub, and, ...)
         instr = extract_instr(instruction) ## converts instructions into commands and arguments
         if instr in cmd_singleton :
+            output.append('//' + str(instruction[0:]) + '\n')
             output.extend(globals()[instr](counter))
             counter += instr_len[instr]
         ## memory management 
         elif instr in cmd_pointer:
+            output.append('//' + str(instruction[0:]) + '\n')
             output.extend(globals()[instr](int(instruction[2]), counter))
             counter += instr_len[instr]
         elif instr in cmd_pushpop :
+            output.append('//' + str(instruction[0:]) + '\n')
             output.extend(globals()[instr](int(instruction[2])))
             counter += instr_len[instr]
         ## program flow
         elif instr in cmd_progflow :
+            output.append('//' + str(instruction[0:]) + '\n')
             output.extend(globals()[instr](instruction[1]))
             counter += instr_len[instr]
         elif instr in cmd_function :
+            output.append('//' + str(instruction[0:]) + '\n')
             output.extend(globals()[instr](instruction[1], int(instruction[2])))
-            counter += 1 + int(instruction[2])
-        elif instr in cmd_return :
-            output.extend(globals()[instr]())
+            counter += 1 + int(instruction[2])*instr_len['push_local']
+        elif instr in cmd_call :
+            output.append('//' + str(instruction[0:]) + '\n')
+            output.extend(globals()[instr](instruction[1], int(instruction[2])))
             counter += instr_len[instr]
 
-
-    print ("@MAIN_LOOP_START" in output)
+        elif instr in cmd_return :
+            output.append('//' + str(instruction[0:]) + '\n')
+            output.extend(globals()[instr]())
+            counter += instr_len[instr]
     return output
 
 
@@ -543,14 +616,9 @@ def gen_file(ass_out, in_file) :
         f.write(instr + "\n")
     f.close()
 
-
-
-
-
 def main (args) :
     filename = args[0]
     output = read_in_file(filename)
-    print(output)
     asm = generate_ass(output)
     gen_file(asm, filename)
 
