@@ -10,7 +10,7 @@ def read_in(path, ext) :
         if os.path.isfile(os.path.join(path, file)):
             if str('.') + ext in file:
                 output.append(file)
-                print(file)
+                ##print(file)
     return output
 
 
